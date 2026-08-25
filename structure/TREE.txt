@@ -1,0 +1,19 @@
+Conv-TasNet/
+|-- src/
+|   |-- conv_tasnet.py
+|   |-- utils.py
+|   `-- ...
+`-- structure/
+    |-- LAYOUT.md
+    `-- demo/
+        |-- app.py
+        |-- utils.py
+        |-- separate_ica.py
+        |-- separate_conv_tasnet.py
+        |-- speaker_detection.py
+        |-- requirements.txt
+        |-- start_server.ps1
+        |-- README.md
+        |-- static/
+        |-- uploads/
+        `-- outputs/

@@ -1,0 +1,15 @@
+egs/*/data
+egs/*/exp
+
+tools/sph2pipe_v2.5
+tools/create-speaker-mixtures
+
+nohup.out
+__pycache__
+.pytest_cache/
+.venv/
+venv/
+
+structure/demo/uploads/
+structure/demo/outputs/
+structure/demo/*.log

@@ -1,0 +1,9 @@
+flask
+numpy
+soundfile
+librosa
+scikit-learn
+torch
+torchaudio
+resampy
+python-dotenv
