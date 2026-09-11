@@ -1,0 +1,320 @@
+================================================================================
+                    SIH VOICE ACTIVATOR - COMPLETE GUIDE
+        NOVA: Low-Latency Voice Activator for Edge Devices (SIH 2026, PS-26172)
+================================================================================
+For a reader with zero background in this project, wake-word detection, or
+speech recognition. Every fact/parameter below was verified against the code.
+
+
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+NOVA is a voice-controlled smart-room assistant. A person says a wake word
+("NOVA") followed by a command ("turn on the fan"); the system listens,
+understands it, and changes a device's state, visible instantly in an
+on-screen smart-room UI.
+
+Problem it solves: most voice assistants run entirely in the cloud
+(privacy/latency cost) or need expensive hardware. This project shows a
+mostly-local, low-latency pipeline suited to a resource-constrained
+("edge") device: a tiny neural network listens for the wake word locally;
+only a short recognized command needs speech-to-text.
+
+Step by step: (1) system continuously listens; (2) user says "NOVA"; (3)
+user says a short command; (4) speech becomes text, then device+action;
+(5) the room UI updates immediately (e.g. fan blades spin).
+
+
+2. WORKFLOW & FLOWCHART
+--------------------------------------------------------------------------------
+  Microphone captures audio  (audio_processing/capture.py)
+        |
+  Feature extraction: audio -> log-Mel spectrogram (a picture-like view
+  of sound)                  (keyword_spotting/features.py)
+        |
+  NOVA wake-word scoring     (keyword_spotting/detector.py, TinyKWSNet)
+        |
+  +-----------------+
+  | NOVA detected?  |--- NO ---> back to "Microphone captures audio"
+  | (score >= thr.  |
+  | for 3 windows)  |
+  +-----------------+
+        | YES
+  Capture command audio      (audio_processing/session.py)
+        |
+  Speech-to-text (ASR)       (asr/transcriber.py, faster-whisper)
+        |
+  Command Interpreter: text -> intent/device/action
+                              (command/interpreter.py)
+        |
+  Device state update        (api/device_state.py)
+        |
+  UI updates the matching device (fan/light/AC/TV/door)
+                              (frontend/code.html)
+        |
+  Back to listening for the next "NOVA"
+
+Each box above is its own tested module - see voice_pipeline/orchestrator.py,
+which wires them together without re-implementing any of them.
+
+
+3. MAJOR COMPONENTS
+--------------------------------------------------------------------------------
+audio_processing/  Captures mic audio (capture.py, via sounddevice),
+  detects silence (vad.py), manages wake->record->stop (session.py:
+  AudioSessionManager). In: raw samples. Out: one command-audio segment.
+
+keyword_spotting/  Recognizing "NOVA": features.py (spectrogram),
+  model.py (TinyKWSNet), detector.py (KeywordDetector), tinykws_backend.py
+  (checkpoint loading). In: audio window. Out: NOVA probability (0-1).
+
+keyword_spotting/training/  Builds the KWS model: dataset.py (loads
+  recordings), splitting.py (fair train/val/test split), train.py,
+  metrics.py. In: .wav files. Out: a trained checkpoint.
+
+asr/  Speech-to-text via faster-whisper (transcriber.py). In: command
+  audio. Out: text.
+
+command/  Rule-based text->action matching (interpreter.py:
+  CommandInterpreter). In: text. Out: {intent, device, action}.
+
+voice_pipeline/  The orchestrator (orchestrator.py) that calls every
+  stage above in order and times each step.
+
+api/  FastAPI server: serves the UI, runs the live mic pipeline in the
+  background (live_session.py), holds device state (device_state.py),
+  pushes updates over WebSocket (routers/live.py).
+
+frontend/  The browser smart-room UI (code.html): a photorealistic room
+  with animated device layers (lamp glow, spinning fan, AC mist, door
+  swing, TV screen).
+
+scripts/  Command-line tools to test each stage alone (mic-only, KWS-only,
+  full pipeline, dataset validation) without the UI.
+
+tests/  370 automated unit/integration tests (at time of writing).
+
+voice_separation/ (Conv-TasNet)  NOT part of the NOVA workflow - a
+  separate, earlier-milestone speaker-separation module with its own API
+  endpoints, never called by the wake->command pipeline.
+
+
+4. WAKE-WORD DETECTION
+--------------------------------------------------------------------------------
+A "wake word" is a word a device listens for constantly so it only pays
+real attention once addressed (like "Hey Siri"). The KWS model does not
+understand language - it only answers "does this second of audio sound
+like NOVA?", returning a probability 0-1.
+
+TinyKWSNet (keyword_spotting/model.py) is a small custom CNN, deliberately
+tiny (6,018 trainable parameters, ~31 KB saved) for eventual edge hardware.
+
+Audio becomes a log-Mel spectrogram (a 2D energy-over-time-and-pitch grid,
+like a piano roll) over a 1.0-second window with 40 Mel bands
+(keyword_spotting/features.py), which the CNN scores via softmax.
+
+The threshold is the cutoff for "yes, that's NOVA." detector.py also
+requires 3 consecutive windows above threshold (DEFAULT_CONSECUTIVE_FRAMES
+= 3) before declaring a detection, so one noisy frame can't false-trigger.
+
+Production default vs. demo threshold: shipped default is
+DEFAULT_THRESHOLD = 0.85. Measured on this project's 10 verified NOVA
+recordings, real utterances score only 0.25-0.63 - never reaching 0.85, so
+at default the model essentially never fires. For live demos only, an
+explicit opt-in override exists: --kws-threshold 0.40 (scripts/
+voice_command_demo.py) or the NOVA_KWS_THRESHOLD env var
+(api/live_session.py). 0.40 is a demo-only value chosen from measuring
+this project's own 20 recordings - NOT a claimed production accuracy
+figure - and the real code default (0.85) is never changed.
+
+
+5. DATASET AND TRAINING
+--------------------------------------------------------------------------------
+Positive samples = recordings of "NOVA" (teach the target word). Negative
+samples = other speech ("hello," "computer") - teach what to reject. Both
+are required.
+
+Dataset: exactly 10 positive + 10 negative real recordings
+(data/kws/real/positive|negative/), each manually reviewed. All 20 clips:
+1.0s, 16,000 Hz, mono .wav.
+
+Training command used:
+  python -m keyword_spotting.training.train --data-dir data/kws/real
+    --out models/kws_nova_cnn.pt --epochs 30
+
+Split (keyword_spotting/training/splitting.py, val_fraction=0.15,
+test_fraction=0.15 defaults, on 20 examples): 12 train / 4 val / 4 test.
+
+Output: models/kws_nova_cnn.pt - weights + feature config + metrics at
+save time: best val accuracy 0.75, test accuracy 1.0 (on only 4 examples).
+
+LIMITATION: 20 recordings from ~1-2 speakers is very small. "1.0 test
+accuracy" uses only 4 examples and a looser 50% boundary than the real
+0.85 threshold - not evidence of general reliability. Checking the
+deployed model against all 20 clips shows the top non-NOVA score (0.62)
+almost ties the top NOVA score (0.63) - no single threshold cleanly
+separates the classes yet. More recordings/speakers/conditions are needed.
+
+
+6. AUDIO PARAMETERS
+--------------------------------------------------------------------------------
+Parameter                | Meaning / why it matters              | Value
+--------------------------+----------------------------------------+--------
+Sample rate               | Samples/sec; must match model & ASR   | 16000 Hz
+Channels                  | Mic channels; model needs mono        | 1
+Sample format             | How samples are stored                | float32
+Mic chunk size            | Samples per MicCapture callback       | 512
+KWS analysis window       | Audio span the wake model inspects    | 1.0 s
+KWS hop                   | How often a new window is scored      | 0.2 s
+Mel bands (n_mels)        | Frequency bands in the spectrogram    | 40
+Feature window/hop        | FFT window/stride inside spectrogram  | 25/10 ms
+Pre-roll                  | Audio kept before wake fires, so the  | 1.0 s
+                          | instant after "NOVA" isn't lost        |
+Min command duration      | Shortest capture before silence can   | 1.2 s
+                          | end it (guards a post-NOVA pause)      |
+Silence timeout           | Silence that ends capture             | 0.8 s
+Max command duration      | Hard cap on one recording             | 8.0 s
+KWS threshold (default)   | Min NOVA probability to count as a hit| 0.85
+KWS threshold (demo)      | Session-only override for live demo   | 0.40
+Consecutive frames        | Windows in a row above threshold      | 3
+
+
+7. ASR / SPEECH RECOGNITION
+--------------------------------------------------------------------------------
+ASR converts recorded speech into text. This project uses faster-whisper,
+a fast local build of OpenAI's Whisper, size "tiny.en," on CPU
+(asr/transcriber.py) - generic/pretrained, NOT fine-tuned on NOVA data.
+
+Flow: once AudioSessionManager finishes a recording, the audio goes
+straight to Transcriber.transcribe() - no file, no network call.
+
+On empty/bad audio: ASR never invents a result; a blank/garbled string
+just fails to match any command pattern, reported as action="unknown"
+(shown as "Command not recognized," not silently dropped).
+
+Config: model tiny.en, device cpu, compute type int8 (a faster,
+lower-precision format for CPU inference).
+
+
+8. COMMAND INTERPRETATION
+--------------------------------------------------------------------------------
+CommandInterpreter (command/interpreter.py) is a small, local, rule-based
+text matcher - not ML. Ordered regex patterns produce intent, device,
+action, and confidence (exactly 1.0 for a match, 0.0 for none -
+deliberately binary since this is deterministic matching, not a model).
+
+Example - "turn on the fan":
+  Intent: device_control   Device: fan   Action: turn_on
+
+Other supported commands (from the actual code):
+  "open the door"      -> device_control, door,  open
+  "turn off the light" -> device_control, light, turn_off
+  "turn on the TV"     -> device_control, tv,    turn_on
+
+(Volume/music/help/stop patterns also exist, though the room UI only
+visualizes the five devices above.) A recognized verb with no valid
+device gets missing_parameters:["device"] instead of "unknown."
+
+
+9. UI AND DEVICE CONTROL
+--------------------------------------------------------------------------------
+A full-screen photorealistic bedroom/office scene with a dark header
+(logo, clock, mic indicator) and a bottom info strip (last interaction,
+NOVA's response, latency). Floating cards sit over each device: Fan, AC,
+Door, Light, TV.
+
+One JS object, DeviceState (frontend/code.html), holds every device's
+state; each device's own visual (spinning fan blades, lamp glow, AC mist,
+TV screen, door swing) reacts to that same shared state.
+
+Voice path: api/live_session.py -> device_state.py (execute_device()) ->
+WebSocket device_update -> browser's handleLiveEvent() -> toggleDevice().
+Manual demo buttons call that exact same toggleDevice() - so voice and
+manual control always stay synchronized on one shared state.
+
+Example: "NOVA, turn on the fan" switches the Fan card to "ON" and starts
+the fan-blade rotation animation - not just a text change.
+(Documentation only - no UI changes were made while writing this.)
+
+
+10. TOOLS AND TECHNOLOGIES
+--------------------------------------------------------------------------------
+Tool/Library     | Purpose                        | Where used
+------------------+---------------------------------+----------------------
+PyTorch           | Defines/runs TinyKWSNet         | keyword_spotting/
+torchaudio        | Audio utilities                 | voice_separation/
+librosa           | Spectrogram extraction          | keyword_spotting/features.py
+soundfile         | Reads/writes .wav files         | audio_processing/, training
+sounddevice       | Live mic stream (PortAudio)     | audio_processing/capture.py
+faster-whisper    | Speech-to-text (ASR)            | asr/transcriber.py
+FastAPI           | Web server, UI + APIs           | api/main.py, api/routers/
+uvicorn           | Runs the FastAPI app            | uvicorn api.main:app
+NumPy             | Numeric ops on audio            | throughout
+scikit-learn      | ML utilities for training/eval  | keyword_spotting/training/
+pydantic          | API data-validation schemas     | api/schemas.py
+pytest            | Test runner (370 tests)         | tests/
+HTML/CSS/JS + SVG | Smart-room UI, animated fan     | frontend/code.html
+
+
+11. COMPLETE EXAMPLE: "NOVA, TURN ON THE FAN"
+--------------------------------------------------------------------------------
+1. MicCapture delivers 512-sample chunks continuously.
+2. A sliding 1.0s window becomes a 40-band spectrogram every 0.2s;
+   TinyKWSNet scores "NOVA-ness."
+3. Score clears the active threshold (0.40 in the demo) for 3 windows in
+   a row -> KeywordDetector returns status="DETECTED".
+4. AudioSessionManager enters COMMAND_CAPTURE, seeded with 1.0s of
+   pre-roll, and records until >=0.8s silence follows >=1.2s captured.
+5. faster-whisper transcribes the segment to "turn on the fan".
+6. CommandInterpreter matches turn_on -> device="fan", action="turn_on",
+   confidence=1.0.
+7. execute_device("fan","turn_on") sets the fan's state to "ON".
+8. Broadcast as a device_update event; the browser calls
+   toggleDevice("fan", true) - Fan card shows "ON," blades start rotating.
+9. Session resets and returns to listening.
+
+
+12. STATUS AND LIMITATIONS
+--------------------------------------------------------------------------------
+WORKING, verified live: full pipeline runs end-to-end on a real mic
+(wake->capture->ASR->interpretation->live UI update), confirmed for fan,
+light, TV, door. 370 tests pass. Manual and voice control stay
+synchronized on one shared state.
+
+DEMO-GRADE, not production claims: KWS threshold runs at an explicit 0.40
+override for demo purposes only; shipped default remains 0.85 (at which
+the model essentially never fires). At 0.40 the system also produces
+false wake detections on ambient noise fairly often (9 of 10 verified
+negative recordings score below 0.40, ~90% specificity; continuous
+listening multiplies that remaining chance many times per minute). The
+KWS model trained on only 20 recordings total - far too few for a general
+accuracy claim.
+
+NOT validated on final SIH hardware: every latency/memory number here was
+measured on a development laptop's CPU, not any target edge device.
+
+KNOWN limitations: recordings likely come from few speakers/one room; top
+non-NOVA and top NOVA scores are nearly tied (no threshold perfectly
+separates them yet); command/interpreter.py's vocabulary is a small
+illustrative example set, not a finalized NOVA command list.
+
+
+13. ONE-MINUTE SUMMARY
+--------------------------------------------------------------------------------
+NOVA is a voice-controlled smart-room demo. A tiny purpose-built neural
+network (TinyKWSNet, ~6,000 parameters, ~31 KB) listens continuously for
+"NOVA," scoring one-second audio windows about 5x/second. Confident for
+three windows in a row, it records what's said next, converts it to text
+with a local Whisper model, matches the text to a small set of known
+commands (on/off, open/close for fan/light/TV/AC/door), and updates that
+device live in a photorealistic smart-room UI where the physical device
+itself reacts - not just a text label. The KWS model trained on only 20
+verified recordings, and the production threshold (0.85) is currently too
+strict for this small dataset to cross - so today's demo runs on an
+explicit, clearly-labeled 0.40 override, not the shipped default.
+Everything downstream of wake detection is fully working and tested; the
+wake-word model is the one honestly-labeled demo-grade piece, and more
+diverse training data is the clear next step toward production readiness.
+
+================================================================================
+End of document.
+================================================================================
