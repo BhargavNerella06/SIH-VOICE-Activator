@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import overlap_and_add
+from .utils import overlap_and_add
 
 EPS = 1e-8
 

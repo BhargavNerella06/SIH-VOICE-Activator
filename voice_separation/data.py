@@ -157,7 +157,7 @@ def _collate_fn(batch):
 
 
 # Eval data part
-from preprocess import preprocess_one_dir
+from .preprocess import preprocess_one_dir
 
 class EvalDataset(data.Dataset):
 

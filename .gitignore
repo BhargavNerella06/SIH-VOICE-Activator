@@ -13,3 +13,28 @@ venv/
 structure/demo/uploads/
 structure/demo/outputs/
 structure/demo/*.log
+
+# KWS training data and checkpoints (local, regenerable, not committed).
+# The verified real recordings under data/ are excluded deliberately --
+# they're personal voice recordings, not just "regenerable" build output.
+data/
+models/*.pt
+models/*.pth.tar
+models/*.onnx
+models/*_calibration.json
+# ...except the actual trained NOVA checkpoint the demo depends on: it's
+# ~31KB (nowhere near GitHub's size limits) and isn't reproducible from
+# anything else in this repo without the (gitignored) real recordings
+# above, so it needs to be committed for the demo to work for anyone who
+# clones this repo.
+!models/kws_nova_cnn.pt
+
+# Scratch benchmark/export/pipeline outputs and build metadata (local,
+# regenerable, not committed)
+outputs/
+*.egg-info/
+
+# Temporary diagnostic output from scripts/debug_command_capture.py --
+# contains whatever audio was captured during ad-hoc mic debugging
+# (potentially real voice recordings), not project source.
+scripts/_debug_output/

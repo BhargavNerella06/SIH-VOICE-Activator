@@ -9,9 +9,9 @@ import os
 import librosa
 import torch
 
-from data import EvalDataLoader, EvalDataset
-from conv_tasnet import ConvTasNet
-from utils import remove_pad
+from .data import EvalDataLoader, EvalDataset
+from .conv_tasnet import ConvTasNet
+from .utils import remove_pad
 
 
 parser = argparse.ArgumentParser('Separate speech using Conv-TasNet')

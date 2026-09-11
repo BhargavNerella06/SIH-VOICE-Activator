@@ -1,0 +1,12 @@
+﻿# Development / testing dependencies
+pytest>=7.0
+pytest-asyncio>=0.21
+httpx
+coverage
+
+# KWS dataset tooling (dev-only, not needed at inference time):
+# pywin32 talks to Windows SAPI directly for keyword_spotting/training/synth_data.py.
+# Windows-only. (pyttsx3 was tried first and found unusably slow/unreliable on
+# this machine when reused across many synth calls -- see synth_data.py docstring.)
+pywin32
+psutil

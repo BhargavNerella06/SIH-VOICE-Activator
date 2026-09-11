@@ -11,10 +11,10 @@ from mir_eval.separation import bss_eval_sources
 import numpy as np
 import torch
 
-from data import AudioDataLoader, AudioDataset
-from pit_criterion import cal_loss
-from conv_tasnet import ConvTasNet
-from utils import remove_pad
+from .data import AudioDataLoader, AudioDataset
+from .pit_criterion import cal_loss
+from .conv_tasnet import ConvTasNet
+from .utils import remove_pad
 
 
 parser = argparse.ArgumentParser('Evaluate separation performance using Conv-TasNet')

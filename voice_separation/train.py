@@ -7,9 +7,9 @@ import argparse
 
 import torch
 
-from data import AudioDataLoader, AudioDataset
-from solver import Solver
-from conv_tasnet import ConvTasNet
+from .data import AudioDataLoader, AudioDataset
+from .solver import Solver
+from .conv_tasnet import ConvTasNet
 
 
 parser = argparse.ArgumentParser(

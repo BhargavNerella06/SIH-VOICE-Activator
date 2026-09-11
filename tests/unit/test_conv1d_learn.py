@@ -10,8 +10,8 @@ D = 2
 print('Cin, Cout, F, S, B, Lin, D=', Cin, Cout, F, S, B, Lin, D)
 conv1d = torch.nn.Conv1d(Cin, Cin, F, S, bias=False, padding=(F-1)*D, dilation=D, groups=Cin)
 #conv1d = torch.nn.Conv1d(Cin, Cin, F, S, bias=False, padding=1, dilation=1, groups=Cin)
-inputs = torch.randint(3, (B, Cin, Lin))
-conv1d.weight.data = torch.randint(5, conv1d.weight.size())
+inputs = torch.randint(3, (B, Cin, Lin)).float()
+conv1d.weight.data = torch.randint(5, conv1d.weight.size()).float()
 outputs = conv1d(inputs)
 # Lout = (Lin - F) / S + 1
 
